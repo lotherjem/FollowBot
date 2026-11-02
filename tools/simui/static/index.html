@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarryBot simulator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%234ea1ff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>CarryBot <span>simulator</span></h1>
+  <div class="transport">
+    <button id="btn-run" class="primary">Run</button>
+    <button id="btn-step">Step</button>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-random">New seed</button>
+  </div>
+  <div class="clock">
+    <span class="pill" id="status-pill">IDLE</span>
+    <span id="clock-label">0.0 s</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ---------------------------------------------------------------- -->
+  <aside class="panel controls">
+
+    <section>
+      <h2>World</h2>
+      <label class="row">
+        <span>Scenario</span>
+        <select id="scenario" data-rebuild>
+          <option value="open">open — scattered blocks</option>
+          <option value="rooms">rooms — walls with doorways</option>
+          <option value="maze">maze — tight corridors</option>
+          <option value="trap">trap — cul-de-sac in the way</option>
+          <option value="blank">blank — draw it yourself</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>Seed</span>
+        <input type="number" id="seed" min="0" max="99999" step="1" data-rebuild>
+      </label>
+      <label class="row">
+        <span>Size <small>cells</small></span>
+        <input type="number" id="size" min="60" max="400" step="10" data-rebuild>
+      </label>
+      <label class="row slider">
+        <span>Sensor range <small class="value" id="sensor_range-out"></small></span>
+        <input type="range" id="sensor_range" min="0.5" max="6" step="0.1" data-live>
+      </label>
+      <label class="row slider">
+        <span>Sensor FOV <small class="value" id="sensor_fov-out"></small></span>
+        <input type="range" id="sensor_fov" min="30" max="360" step="0.5" data-live>
+      </label>
+    </section>
+
+    <section>
+      <h2>Sensor head</h2>
+      <p class="hint">A pan servo under the camera. It tracks the target while
+        the body drives the route, sweeps to find them again when they are
+        lost, and otherwise looks at whatever the map is least sure about.</p>
+      <label class="check"><input type="checkbox" id="head_enabled" data-live>
+        <span>Head on a servo</span></label>
+      <label class="row slider">
+        <span>Max head angle <small class="value" id="head_max_angle-out"></small></span>
+        <input type="range" id="head_max_angle" min="5" max="90" step="1" data-live>
+      </label>
+      <label class="check"><input type="checkbox" id="head_survey" data-live>
+        <span>Look around when idle</span></label>
+      <label class="check"><input type="checkbox" id="head_body_assist" data-live>
+        <span>Turn the body to keep them in view</span></label>
+    </section>
+
+    <section>
+      <h2>Moving target</h2>
+      <p class="hint">Pick <b>Target path</b> above and drag on the map to draw
+        the route a person walks. They are a real obstacle, so the robot has to
+        see them to follow them.</p>
+      <label class="row slider">
+        <span>Target speed <small class="value" id="target_speed-out"></small></span>
+        <input type="range" id="target_speed" min="0" max="2" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Standoff <small class="value" id="target_standoff-out"></small></span>
+        <input type="range" id="target_standoff" min="0.4" max="3" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Carry when lost <small class="value" id="target_predict-out"></small></span>
+        <input type="range" id="target_predict" min="0" max="3" step="0.1" data-live>
+      </label>
+      <label class="row slider">
+        <span>Chase when lost <small class="value" id="target_pursue-out"></small></span>
+        <input type="range" id="target_pursue" min="0" max="1" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Target size <small class="value" id="target_radius-out"></small></span>
+        <input type="range" id="target_radius" min="0.1" max="0.6" step="0.02" data-live>
+      </label>
+      <label class="row">
+        <span>At the end</span>
+        <select id="target_loop" data-live>
+          <option value="loop">loop round</option>
+          <option value="pingpong">walk back</option>
+          <option value="once">stop</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="target_solid" data-live>
+        <span>Target blocks the robot</span></label>
+      <button id="btn-clear-target" class="wide">Clear target path</button>
+    </section>
+
+    <section>
+      <h2>Motion</h2>
+      <div class="segmented" id="mode-group">
+        <button data-mode="planner" class="active">Planner only</button>
+        <button data-mode="fullstack">Full stack</button>
+      </div>
+      <p class="hint" id="mode-hint"></p>
+      <label class="row">
+        <span>On arrival</span>
+        <select id="on_arrival" data-live-nokick>
+          <option value="hold">hold — wait for the next goal</option>
+          <option value="queue">next queued waypoint</option>
+          <option value="random">new random goal</option>
+          <option value="patrol">patrol — back and forth</option>
+        </select>
+      </label>
+      <p class="hint">The planner never stops; it just reports AT_GOAL and
+        waits. Anything but "hold" gives it somewhere new to be.</p>
+      <label class="row slider" id="speed-row">
+        <span>Sim speed <small class="value" id="speed-out"></small></span>
+        <input type="range" id="speed" min="0.25" max="6" step="0.25" data-live-nokick>
+      </label>
+    </section>
+
+    <section id="drive-section">
+      <h2>Drive realism</h2>
+      <p class="hint">Full-stack mode only. These are what an uncalibrated
+        robot actually has.</p>
+      <label class="check"><input type="checkbox" id="calibrated" data-rebuild>
+        <span>Feedforward calibrated</span></label>
+      <label class="row slider">
+        <span>Wheel size error <small class="value" id="wheel_error-out"></small></span>
+        <input type="range" id="wheel_error" min="0.85" max="1.15" step="0.01" data-rebuild>
+      </label>
+      <label class="row slider">
+        <span>Track width error <small class="value" id="track_error-out"></small></span>
+        <input type="range" id="track_error" min="0.85" max="1.15" step="0.01" data-rebuild>
+      </label>
+      <label class="row slider">
+        <span>Motor mismatch <small class="value" id="skew-out"></small></span>
+        <input type="range" id="skew" min="0" max="0.4" step="0.01" data-rebuild>
+      </label>
+      <label class="row"><span>No-load speed <small>rad/s</small></span>
+        <input type="number" id="no_load_speed" min="2" max="60" step="0.5" data-rebuild></label>
+      <label class="row"><span>Deadband <small>% duty</small></span>
+        <input type="number" id="motor_deadband" min="0" max="40" step="0.5" data-rebuild></label>
+      <label class="row"><span>Motor tau <small>s</small></span>
+        <input type="number" id="motor_tau" min="0.01" max="1" step="0.01" data-rebuild></label>
+    </section>
+
+    <section>
+      <h2>Planner</h2>
+      <p class="hint">Applied live — no restart.</p>
+      <label class="row slider">
+        <span>Heuristic weight <small class="value" id="heuristic_weight-out"></small></span>
+        <input type="range" id="heuristic_weight" min="1" max="4" step="0.05" data-live>
+      </label>
+      <p class="hint warn" id="weight-warning" hidden></p>
+      <label class="row slider">
+        <span>Unknown cost <small class="value" id="unknown_cost-out"></small></span>
+        <input type="range" id="unknown_cost" min="0" max="250" step="5" data-live>
+      </label>
+      <label class="row slider">
+        <span>Turn cost <small class="value" id="turn_cost-out"></small></span>
+        <input type="range" id="turn_cost" min="0" max="6" step="0.1" data-live>
+      </label>
+      <label class="row slider">
+        <span>Safety margin <small class="value" id="safety_margin-out"></small></span>
+        <input type="range" id="safety_margin" min="0" max="0.3" step="0.01" data-rebuild>
+      </label>
+      <label class="row slider">
+        <span>Search radius <small class="value" id="search_radius-out"></small></span>
+        <input type="range" id="search_radius" min="1" max="15" step="0.5" data-live>
+      </label>
+      <label class="row"><span>Max expansions</span>
+        <input type="number" id="max_expansions" min="2000" max="400000" step="1000" data-live></label>
+      <label class="check"><input type="checkbox" id="allow_unknown" data-live>
+        <span>Unknown space is traversable</span></label>
+      <label class="check"><input type="checkbox" id="directional_states" data-live>
+        <span>Per-heading search states</span></label>
+    </section>
+
+    <section>
+      <h2>Follower</h2>
+      <label class="row slider">
+        <span>Lookahead <small class="value" id="lookahead-out"></small></span>
+        <input type="range" id="lookahead" min="0.1" max="1.5" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Max linear <small class="value" id="max_linear-out"></small></span>
+        <input type="range" id="max_linear" min="0.05" max="1.2" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Max angular <small class="value" id="max_angular-out"></small></span>
+        <input type="range" id="max_angular" min="0.2" max="5" step="0.1" data-live>
+      </label>
+    </section>
+
+  </aside>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section class="stage">
+
+    <div class="toolbar">
+      <div class="segmented" id="tool-group">
+        <button data-tool="goal" class="active">Set goal</button>
+        <button data-tool="wall">Draw wall</button>
+        <button data-tool="erase">Erase</button>
+        <button data-tool="queue">Add waypoint</button>
+        <button data-tool="target">Target path</button>
+        <button data-tool="none">Look only</button>
+      </div>
+      <label class="row slider inline">
+        <span>Brush <small class="value" id="brush-out"></small></span>
+        <input type="range" id="brush" min="0.05" max="0.8" step="0.05" value="0.15">
+      </label>
+      <label class="row slider inline">
+        <span>Zoom <small class="value" id="zoom-out"></small></span>
+        <input type="range" id="zoom" min="1" max="8" step="0.1" value="1">
+      </label>
+      <label class="check inline"><input type="checkbox" id="follow">
+        <span>Follow robot</span></label>
+      <div class="queue-box">
+        <span id="queue-label">queue empty</span>
+        <button id="btn-clear-queue">Clear</button>
+      </div>
+      <div class="layers">
+        <label class="check inline"><input type="checkbox" id="layer-path" checked><span>Path</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-trail" checked><span>Trail</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-odom" checked><span>Odometry</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-sensor" checked><span>Sensor</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-target" checked><span>Target</span></label>
+      </div>
+    </div>
+
+    <div class="canvases">
+      <figure>
+        <figcaption>Ground truth <small>click to place the goal, drag to draw</small></figcaption>
+        <canvas id="canvas-world"></canvas>
+      </figure>
+      <figure>
+        <figcaption>What the planner knows <small>inflated cost layer</small></figcaption>
+        <canvas id="canvas-map"></canvas>
+      </figure>
+    </div>
+
+    <div class="legend">
+      <span><i style="background:#5a6572"></i>obstacle</span>
+      <span><i style="background:#d9484b"></i>lethal + inflation</span>
+      <span><i style="background:#a8632f"></i>high cost</span>
+      <span><i style="background:#2b4a55"></i>free</span>
+      <span><i style="background:#0b0e12;border:1px solid #2a323c"></i>unknown</span>
+      <span><i style="background:#4ea1ff"></i>true path</span>
+      <span><i style="background:#ff9f45"></i>odometry</span>
+      <span><i style="background:#ffd166"></i>plan</span>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <aside class="panel readouts">
+    <section>
+      <h2>Plan</h2>
+      <div class="stat"><span>status</span><b id="r-status">—</b></div>
+      <div class="stat"><span>search time</span><b id="r-plan-ms">—</b></div>
+      <div class="stat"><span>expansions</span><b id="r-expansions">—</b></div>
+      <div class="stat"><span>plans issued</span><b id="r-plan-seq">—</b></div>
+      <div class="stat"><span>map explored</span><b id="r-known">—</b></div>
+      <div class="stat"><span>goals reached</span><b id="r-arrivals">—</b></div>
+      <canvas class="spark" id="spark-plan"></canvas>
+      <p class="hint">search time, ms</p>
+    </section>
+
+    <section>
+      <h2>Robot</h2>
+      <div class="stat"><span>true pose</span><b id="r-true">—</b></div>
+      <div class="stat"><span>odometry</span><b id="r-odom">—</b></div>
+      <div class="stat warnable" id="drift-stat"><span>drift</span><b id="r-drift">—</b></div>
+      <div class="stat"><span>distance</span><b id="r-distance">—</b></div>
+      <div class="stat warnable" id="contact-stat"><span>wall contacts</span><b id="r-collisions">—</b></div>
+      <canvas class="spark" id="spark-speed"></canvas>
+      <p class="hint">body speed, m/s</p>
+    </section>
+
+    <section id="drive-readouts">
+      <h2>Drive</h2>
+      <div class="stat"><span>wheel speed</span><b id="r-wheels">—</b></div>
+      <div class="stat"><span>duty</span><b id="r-duty">—</b></div>
+      <div class="stat"><span>counts</span><b id="r-counts">—</b></div>
+      <div class="stat warnable" id="enc-stat"><span>encoder err / desync</span><b id="r-enc">—</b></div>
+      <div class="stat warnable" id="ovr-stat"><span>loop overruns</span><b id="r-overruns">—</b></div>
+    </section>
+
+    <section>
+      <h2>Notes</h2>
+      <p class="hint" id="note-text">Press Run. Click the left map to move the
+        goal; drag with "Draw wall" to put something in the robot's way and
+        watch it replan.</p>
+      <pre class="error" id="error-box" hidden></pre>
+    </section>
+  </aside>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

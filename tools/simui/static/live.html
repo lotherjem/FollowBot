@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarryBot live</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2363d297'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="live">
+
+<header>
+  <h1>CarryBot <span>live</span></h1>
+  <div class="motors" id="motors">
+    <button id="btn-motors" class="motor-switch" role="switch" aria-checked="false"
+            aria-describedby="motors-tip">
+      <span class="track"><span class="thumb"></span></span>
+      <span class="motor-text"><b id="motors-state">MOTORS OFF</b><small id="motors-sub">dry run</small></span>
+      <span class="motor-count" id="motors-count" hidden></span>
+    </button>
+    <div class="motor-tip" id="motors-tip" role="tooltip">
+      <p class="tip-head" id="tip-head">Checking the hardware…</p>
+      <ul class="tip-list bad" id="tip-blockers"></ul>
+      <p class="tip-sub" id="tip-warn-head" hidden>Not blocking, but worth knowing:</p>
+      <ul class="tip-list warn" id="tip-warnings"></ul>
+      <p class="tip-foot" id="tip-detail"></p>
+    </div>
+  </div>
+  <span class="link-dot" id="link-dot" title="connection to the robot"></span>
+  <span class="pill" id="status-pill">—</span>
+  <div class="safety">
+    <button id="btn-arm" class="arm">Arm</button>
+    <button id="btn-estop" class="estop" title="Space">STOP</button>
+  </div>
+</header>
+
+<div class="banner bad" id="banner-link" hidden>Lost contact with the robot. It disarms itself after a second without this page.</div>
+<div class="banner warn" id="banner-viewer" hidden>Being driven from another page. You can watch, press <b>STOP</b> or <b>Disarm</b> here; to drive from this page, disarm it and arm it again here.</div>
+<div class="banner bad" id="banner-estop" hidden><span id="estop-text">Emergency stop is latched.</span> <button id="btn-clear-estop">Clear</button> — clearing does not arm it.</div>
+<div class="banner warn" id="banner-dry" hidden></div>
+<div class="banner warn" id="banner-calib" hidden>Depth is uncalibrated: every range is provisional. Run <code>probe --offsets</code> and <code>probe --focal</code> (CAMERA.md).</div>
+<div class="banner bad" id="banner-geometry" hidden></div>
+
+<main>
+
+  <!-- ---------------------------------------------------------------- -->
+  <aside class="panel controls">
+
+    <section>
+      <h2>Control</h2>
+      <div class="segmented" id="mode-group">
+        <button data-mode="manual" class="active">Manual</button>
+        <button data-mode="goto">Go to</button>
+        <button data-mode="follow">Follow me</button>
+      </div>
+      <p class="hint" id="mode-hint"></p>
+      <div class="pad" id="pad" hidden><div class="knob" id="knob"></div></div>
+      <button id="btn-clear-goal" class="wide" hidden>Clear goal</button>
+    </section>
+
+    <section>
+      <h2>Perception</h2>
+      <label class="check" title="Stereo depth turned into the obstacle map. Off, stereo runs only on the people found, to range them: Follow me still works, nothing new goes on the map, and what is already mapped becomes costly to cross instead of blocked."><input type="checkbox" id="sense-terrain" checked>
+        <span>Map terrain</span></label>
+      <label class="check" title="The person detector. Off, nothing is tracked, and Follow me is unavailable."><input type="checkbox" id="sense-people" checked>
+        <span>Recognise people</span></label>
+      <p class="hint warn" id="sense-note" hidden></p>
+    </section>
+
+    <section>
+      <h2>Camera calibration</h2>
+      <p class="hint">Stand facing the robot at a measured distance until it tracks you, enter the distance and press the button. One distance fixes the offset; a second, a metre or more away, fixes the focal length too.</p>
+      <p class="hint warn" id="range-pinned" hidden></p>
+      <label class="row"><span>Distance (m)</span>
+        <input type="number" id="range-distance" min="0.3" max="8" step="0.05" value="1.5"></label>
+      <button id="btn-range-cal" class="wide">I am standing at this distance</button>
+      <button id="btn-range-clear" class="wide">Clear readings</button>
+      <p class="hint" id="range-note"></p>
+      <p class="hint">Camera angle: how many degrees the camera is tilted, and which way. It decides what counts as floor and what as an obstacle, so a wrong one fills the map with red.</p>
+      <label class="row"><span>Camera angle (deg)</span>
+        <input type="number" id="mount-pitch" min="0" max="45" step="0.5" inputmode="decimal"></label>
+      <div class="segmented" id="pitch-dir">
+        <button data-dir="1" class="active">Tilted down</button>
+        <button data-dir="-1">Tilted up</button>
+      </div>
+      <label class="row"><span>Camera height (m)</span>
+        <input type="number" id="mount-height" min="0.02" max="2" step="0.005"></label>
+      <button id="btn-mount-apply" class="wide">Apply camera angle and height</button>
+      <p class="hint" id="floor-check"></p>
+      <button id="btn-floor-apply" class="wide" hidden>Use the measured floor</button>
+    </section>
+
+    <section>
+      <h2>Speed limits</h2>
+      <p class="hint">Apply to every mode, the autonomous ones included.</p>
+      <label class="row slider">
+        <span>Max linear <small class="value" id="max_linear-out"></small></span>
+        <input type="range" id="max_linear" min="0.05" max="1" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Max turn rate <small class="value" id="max_angular-out"></small></span>
+        <input type="range" id="max_angular" min="0.2" max="4" step="0.1" data-live>
+      </label>
+    </section>
+
+    <section id="follow-section">
+      <h2>Follow me</h2>
+      <p class="hint warn" id="follow-note" hidden></p>
+      <label class="row slider">
+        <span>Standoff <small class="value" id="standoff-out"></small></span>
+        <input type="range" id="standoff" min="0.5" max="3" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Carry when lost <small class="value" id="predict-out"></small></span>
+        <input type="range" id="predict" min="0" max="3" step="0.1" data-live>
+      </label>
+      <label class="row slider">
+        <span>Chase when lost <small class="value" id="pursue-out"></small></span>
+        <input type="range" id="pursue" min="0" max="1" step="0.05" data-live>
+      </label>
+      <label class="check"><input type="checkbox" id="follow_offline" data-live>
+        <span>Keep following if this page goes quiet</span></label>
+      <p class="hint">Off, the robot disarms a second after this page stops
+        talking to it. On, follow-me carries on with the phone in your pocket
+        — and so does nothing but the robot's own logic stop it.</p>
+    </section>
+
+    <section id="head-section">
+      <h2>Head</h2>
+      <p class="hint warn" id="head-note" hidden>The head moves only with a pan servo fitted (<code>[live] servo_fitted</code> or <code>--servo</code>) and the MOTORS switch on.</p>
+      <div class="segmented" id="head-group">
+        <button data-head="auto" class="active">Automatic</button>
+        <button data-head="manual">By hand</button>
+      </div>
+      <label class="row slider" id="head-angle-row" hidden>
+        <span>Point at <small class="value" id="head-angle-out"></small></span>
+        <input type="range" id="head-angle" min="-90" max="90" step="1" value="0">
+      </label>
+      <label class="check"><input type="checkbox" id="head_enabled" data-live>
+        <span>Head moves on its own</span></label>
+      <label class="row slider">
+        <span>Max head angle <small class="value" id="head_max_angle-out"></small></span>
+        <input type="range" id="head_max_angle" min="5" max="90" step="1" data-live>
+      </label>
+      <label class="check"><input type="checkbox" id="head_survey" data-live>
+        <span>Look around when idle</span></label>
+      <label class="check"><input type="checkbox" id="head_body_assist" data-live>
+        <span>Turn the body to keep them in view</span></label>
+    </section>
+
+    <section>
+      <h2>Planner</h2>
+      <label class="row slider">
+        <span>Heuristic weight <small class="value" id="heuristic_weight-out"></small></span>
+        <input type="range" id="heuristic_weight" min="1" max="4" step="0.05" data-live>
+      </label>
+      <label class="row slider">
+        <span>Unknown cost <small class="value" id="unknown_cost-out"></small></span>
+        <input type="range" id="unknown_cost" min="0" max="250" step="5" data-live>
+      </label>
+      <label class="check"><input type="checkbox" id="allow_unknown" data-live>
+        <span>Unknown space is traversable</span></label>
+      <label class="row slider">
+        <span>Lookahead <small class="value" id="lookahead-out"></small></span>
+        <input type="range" id="lookahead" min="0.1" max="1.5" step="0.05" data-live>
+      </label>
+      <button id="btn-reset" class="wide">Clear map and zero odometry</button>
+      <p class="hint">Only while disarmed.</p>
+    </section>
+
+  </aside>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section class="stage">
+    <div class="feeds">
+      <figure>
+        <figcaption>Camera <small id="camera-caption">left eye</small></figcaption>
+        <div class="feed"><img id="img-camera" alt=""><span class="feed-empty" id="camera-empty">waiting for frames</span></div>
+      </figure>
+      <figure>
+        <figcaption>Depth <small>warm is near, black is no match</small></figcaption>
+        <div class="feed"><img id="img-depth" alt=""><span class="feed-empty" id="depth-empty">waiting for frames</span></div>
+      </figure>
+    </div>
+
+    <div class="toolbar">
+      <span class="hint map-hint" id="map-hint"></span>
+      <label class="row slider inline">
+        <span>Zoom <small class="value" id="zoom-out"></small></span>
+        <input type="range" id="zoom" min="0.5" max="6" step="0.1" value="1.5">
+      </label>
+      <label class="check inline"><input type="checkbox" id="follow-robot" checked>
+        <span>Centre on robot</span></label>
+      <div class="layers">
+        <label class="check inline"><input type="checkbox" id="layer-path" checked><span>Path</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-trail" checked><span>Trail</span></label>
+        <label class="check inline"><input type="checkbox" id="layer-sensor" checked><span>Camera</span></label>
+      </div>
+    </div>
+    <figure class="map-figure">
+      <canvas id="canvas-map"></canvas>
+    </figure>
+    <div class="legend">
+      <span><i style="background:#d9484b"></i>obstacle + inflation</span>
+      <span><i style="background:#2b4a55"></i>seen free</span>
+      <span><i style="background:#0b0e12;border:1px solid #2a323c"></i>unknown</span>
+      <span><i style="background:#ffd166"></i>plan</span>
+      <span><i style="background:#4ea1ff"></i>trail</span>
+      <span><i style="background:#c27bff"></i>person</span>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <aside class="panel readouts">
+    <section>
+      <h2>Safety</h2>
+      <div class="stat"><span>state</span><b id="r-armed">—</b></div>
+      <div class="stat"><span>why</span><b id="r-reason" class="wrap">—</b></div>
+      <div class="stat warnable" id="wd-stat"><span>drive watchdog</span><b id="r-watchdog">—</b></div>
+      <div class="stat"><span>motors</span><b id="r-motor-mode">—</b></div>
+    </section>
+    <section>
+      <h2>Motion</h2>
+      <div class="stat"><span>pose</span><b id="r-pose">—</b></div>
+      <div class="stat"><span>would send</span><b id="r-wanted">—</b></div>
+      <div class="stat"><span>sent</span><b id="r-commanded">—</b></div>
+      <div class="stat"><span>measured</span><b id="r-measured">—</b></div>
+      <div class="stat"><span>wheels</span><b id="r-wheels">—</b></div>
+      <div class="stat"><span>duty</span><b id="r-duty">—</b></div>
+      <div class="stat warnable" id="enc-stat"><span>encoder err / desync</span><b id="r-enc">—</b></div>
+      <div class="stat warnable" id="ovr-stat"><span>loop overruns</span><b id="r-overruns">—</b></div>
+      <div class="stat warnable" id="lag-stat" title="Worst delay, over the last half second, between an encoder edge happening and the drive decoding it. Tens of ms is normal; hundreds means the Pi is too busy to hand the edges over."><span>encoder delay L / R</span><b id="r-edge-lag">—</b></div>
+      <canvas class="spark" id="spark-speed"></canvas>
+      <p class="hint">measured speed, m/s</p>
+    </section>
+    <section>
+      <h2>Vision</h2>
+      <div class="stat"><span>rate</span><b id="r-fps">—</b></div>
+      <div class="stat"><span>latency</span><b id="r-latency">—</b></div>
+      <div class="stages" id="r-stages" title="Where each frame's time goes, smoothed. capture: waiting for the camera and decoding; stereo: depth; detect: finding the person; map: obstacles, follower and head."></div>
+      <div class="stat"><span>frames / dropped</span><b id="r-frames">—</b></div>
+      <div class="stat"><span>obstacle cells</span><b id="r-obstacles">—</b></div>
+      <div class="stat warnable" id="reg-stat"><span>lens check</span><b id="r-registration" class="wrap">—</b></div>
+      <p class="hint" id="r-camera"></p>
+    </section>
+    <section>
+      <h2>Person</h2>
+      <div class="stat"><span>state</span><b id="r-follow">—</b></div>
+      <div class="stat"><span>range / bearing</span><b id="r-target">—</b></div>
+      <div class="stat"><span>speed</span><b id="r-tspeed">—</b></div>
+      <p class="hint" id="r-follow-reason"></p>
+    </section>
+    <section>
+      <h2>Head</h2>
+      <div class="stat"><span>angle</span><b id="r-head">—</b></div>
+      <div class="stat"><span>mode</span><b id="r-head-mode">—</b></div>
+      <p class="hint" id="r-head-reason"></p>
+    </section>
+    <section>
+      <h2>Plan</h2>
+      <div class="stat"><span>status</span><b id="r-plan">—</b></div>
+      <div class="stat" title="Time inside the A* search, fresh searches only. Typical, then the slowest 5% over the last 10 s."><span>search · p95</span><b id="r-plan-ms">—</b></div>
+      <div class="stat warnable" id="plan-total-stat" title="From the camera frame (or the click) to the path built from it: queueing, map fusion and the search together. What the robot actually waits for."><span>frame → path · p95</span><b id="r-plan-total">—</b></div>
+      <div class="stat" title="Paths published per second, and how many of them re-used the previous route instead of searching again."><span>plans/s · reused</span><b id="r-plan-rate">—</b></div>
+      <div class="stat warnable" id="plan-age-stat" title="How old the camera frame behind the path being followed right now is."><span>path age</span><b id="r-plan-age">—</b></div>
+      <canvas class="spark" id="spark-plan"></canvas>
+      <p class="hint"><span class="key-total">frame → path</span> and <span class="key-search">search</span>, ms</p>
+      <div class="stat"><span>map explored</span><b id="r-known">—</b></div>
+    </section>
+    <section>
+      <pre class="error" id="error-box" hidden></pre>
+      <button id="btn-logout" class="wide" hidden>Log out</button>
+    </section>
+  </aside>
+
+</main>
+
+<div class="modal-back" id="motor-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">Switch on the real motors?</h2>
+    <p>From now on, arming this page drives the robot. It stays <b>disarmed</b>
+      until you press Arm, and <b>STOP</b> (or Space) cuts the motors at any time.</p>
+    <ul class="modal-points">
+      <li>Speed limit <b id="modal-speed">—</b> — set under Speed limits.</li>
+      <li>First time: wheels off the ground, and check forward is forward.</li>
+      <li>It disarms by itself if this page loses contact for a second.</li>
+    </ul>
+    <div id="modal-warn-box" hidden>
+      <p class="modal-sub">Worth knowing before you do:</p>
+      <ul class="tip-list warn" id="modal-warnings"></ul>
+    </div>
+    <label class="check modal-check"><input type="checkbox" id="modal-clear">
+      <span>The robot is clear to move, and I can reach STOP.</span></label>
+    <div class="modal-buttons">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-confirm" class="danger" disabled>Switch motors on</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/live.js"></script>
+</body>
+</html>

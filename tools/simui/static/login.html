@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarryBot login</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2363d297'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+  form {
+    width: min(340px, 100%); padding: 24px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  p { margin: 0 0 18px; color: var(--dim); font-size: 12.5px; }
+  input[type="password"] {
+    width: 100%; font: inherit; font-size: 15px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 11px; margin-bottom: 12px;
+  }
+  input[type="password"]:focus { outline: none; border-color: var(--accent); }
+  button { width: 100%; padding: 9px; font-size: 14px; }
+  .login-error { margin: 12px 0 0; color: #ffb4b4; font-size: 12.5px; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<form id="login">
+  <h1>CarryBot <span>live</span></h1>
+  <p>This page drives a real robot. Enter the password from <code>[live]</code> in carrybot.toml.</p>
+  <input type="password" id="password" autocomplete="current-password" autofocus
+         aria-label="Password" placeholder="Password">
+  <button type="submit" class="primary">Log in</button>
+  <div class="login-error" id="error" role="alert"></div>
+</form>
+<script>
+'use strict';
+document.getElementById('login').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const error = document.getElementById('error');
+  error.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: document.getElementById('password').value }),
+    });
+    const reply = await res.json();
+    if (reply.ok) { location.replace('/'); return; }
+    error.textContent = reply.error || 'could not log in';
+  } catch (err) {
+    error.textContent = 'could not reach the robot';
+  }
+  document.getElementById('password').select();
+});
+</script>
+</body>
+</html>

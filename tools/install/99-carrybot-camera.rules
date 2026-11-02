@@ -1,0 +1,16 @@
+# CarryBot stereo camera -> /dev/carrybot-stereo
+#
+# Install with tools/install/setup_camera.sh, which fills in the ids for the
+# camera actually plugged in. Written by hand is fine too; replace the two
+# placeholder ids with what `python -m carrybot_vision.probe` reported.
+#
+# ATTR{index}=="0" is the part people leave out and then spend an evening on.
+# A modern UVC driver registers *two* /dev/video* nodes per camera: index 0 is
+# the video capture node, index 1 is a metadata node that opens happily and
+# returns no frames at all. Without this clause the symlink lands on whichever
+# the kernel enumerated last.
+
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="VVVV", ATTRS{idProduct}=="PPPP", ATTR{index}=="0", SYMLINK+="carrybot-stereo", TAG+="systemd"
+
+# If you run two identical cameras, add the serial to tell them apart:
+# SUBSYSTEM=="video4linux", ATTRS{idVendor}=="VVVV", ATTRS{idProduct}=="PPPP", ATTRS{serial}=="SSSS", ATTR{index}=="0", SYMLINK+="carrybot-stereo"

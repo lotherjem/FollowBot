@@ -1,0 +1,43 @@
+# CarryBot live interface, started at boot on the Raspberry Pi.
+#
+# It starts with the MOTORS switch off and disarmed: nothing moves until
+# someone switches the motors on in the browser (which asks, and is blocked if
+# anything is wrong) and then presses Arm. It disarms again if that browser
+# goes away. See LIVE.md. Add --drive hardware to start with the motors on.
+#
+# It listens on the network, so it will not start until a password is set:
+# [live] password in carrybot.toml, or uncomment the Environment line below.
+#
+# Edit User, WorkingDirectory and the python path in ExecStart, then:
+#   sudo cp tools/install/carrybot-live.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now carrybot-live
+
+[Unit]
+Description=CarryBot live interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+# gpio for the motors and servo, video for the camera
+SupplementaryGroups=gpio video
+WorkingDirectory=/home/pi/CarryBot
+# Environment=CARRYBOT_PASSWORD=change-me
+# The venv's python, not /usr/bin/python3: ultralytics lives in the venv, and
+# the system Python cannot see it (follow-me would be greyed out). Use the
+# path `which python` prints with the venv activated.
+ExecStart=/home/pi/carrybot-venv/bin/python -m tools.simui --live --servo --host 0.0.0.0 --no-browser
+Restart=on-failure
+RestartSec=3
+# Exit 2 is a refusal to start (no password, bad carrybot.toml): restarting
+# would only repeat it every 3 s. Fix the file; `journalctl -u carrybot-live`
+# says what is wrong.
+RestartPreventExitStatus=2
+# SIGINT, so the server's own shutdown runs: motors stopped, servo released,
+# GPIO handed back.
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
